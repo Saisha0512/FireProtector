@@ -40,7 +40,7 @@ async function fetchLatestSensorValues(location: any) {
     return {
       temperature: parseFloat(data.field1),
       humidity: parseFloat(data.field2),
-      flame: data.field3,
+      flame: data.field3 == "0" ? "FLAME" : "NONE",
       gas: parseFloat(data.field4),
       pir: data.field5,
       timestamp: data.created_at,
