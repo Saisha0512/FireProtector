@@ -1,0 +1,195 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { useToast } from "@/hooks/use-toast";
+import { RefreshCw, Thermometer, Droplets, Flame, Wind, Eye } from "lucide-react";
+
+interface SensorData {
+  field1: number; // Temperature
+  field2: number; // Humidity
+  field3: number; // Flame
+  field4: number; // Gas
+  field5: number; // PIR
+  created_at: string;
+}
+
+interface Location {
+  id: string;
+  name: string;
+  region: string;
+  thingspeak_channel_id: string;
+  thingspeak_read_key: string;
+}
+
+const LocationsStatus = () => {
+  const { toast } = useToast();
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [sensorData, setSensorData] = useState<{ [key: string]: SensorData }>({});
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetchLocations();
+  }, []);
+
+  const fetchLocations = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("locations")
+        .select("*")
+        .order("name");
+
+      if (error) throw error;
+      setLocations(data || []);
+
+      // Fetch sensor data for all locations
+      data?.forEach(location => {
+        if (location.thingspeak_channel_id && location.thingspeak_read_key) {
+          fetchSensorData(location.id, location.thingspeak_channel_id, location.thingspeak_read_key);
+        }
+      });
+    } catch (error) {
+      toast({
+        title: "Error fetching locations",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const fetchSensorData = async (locationId: string, channelId: string, readKey: string) => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('thingspeak-service', {
+        body: {
+          action: 'getLive',
+          channelId,
+          readKey,
+        }
+      });
+
+      if (error) throw error;
+
+      if (data.success && data.data) {
+        setSensorData(prev => ({
+          ...prev,
+          [locationId]: {
+            field1: data.data.field1 || 0,
+            field2: data.data.field2 || 0,
+            field3: data.data.field3 || 0,
+            field4: data.data.field4 || 0,
+            field5: data.data.field5 || 0,
+            created_at: data.data.created_at,
+          }
+        }));
+      }
+    } catch (error) {
+      console.error(`Error fetching sensor data for ${locationId}:`, error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const refreshAll = () => {
+    locations.forEach(location => {
+      if (location.thingspeak_channel_id && location.thingspeak_read_key) {
+        fetchSensorData(location.id, location.thingspeak_channel_id, location.thingspeak_read_key);
+      }
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Locations Status</h1>
+          <p className="text-muted-foreground">Real-time sensor data from all monitoring locations</p>
+        </div>
+        <Button onClick={refreshAll} disabled={loading}>
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          Refresh All
+        </Button>
+      </div>
+
+      <div className="grid gap-6">
+        {locations.map(location => {
+          const data = sensorData[location.id];
+          
+          return (
+            <Card key={location.id}>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle>{location.name}</CardTitle>
+                    <p className="text-sm text-muted-foreground">{location.region}</p>
+                  </div>
+                  <Badge variant="outline">Channel: {location.thingspeak_channel_id}</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {data ? (
+                  <div className="grid gap-4 md:grid-cols-5">
+                    <Card className="border-primary/20">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Thermometer className="h-5 w-5 text-primary" />
+                          <span className="font-medium">Temperature</span>
+                        </div>
+                        <p className="text-2xl font-bold">{data.field1}°C</p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-primary/20">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Droplets className="h-5 w-5 text-primary" />
+                          <span className="font-medium">Humidity</span>
+                        </div>
+                        <p className="text-2xl font-bold">{data.field2}%</p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-primary/20">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Flame className="h-5 w-5 text-destructive" />
+                          <span className="font-medium">Flame</span>
+                        </div>
+                        <p className="text-2xl font-bold">{data.field3 === 1 ? "Detected" : "None"}</p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-primary/20">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Wind className="h-5 w-5 text-status-warning" />
+                          <span className="font-medium">Gas</span>
+                        </div>
+                        <p className="text-2xl font-bold">{data.field4}</p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-primary/20">
+                      <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Eye className="h-5 w-5 text-primary" />
+                          <span className="font-medium">PIR Motion</span>
+                        </div>
+                        <p className="text-2xl font-bold">{data.field5 === 1 ? "Detected" : "None"}</p>
+                      </CardContent>
+                    </Card>
+                  </div>
+                ) : (
+                  <p className="text-center text-muted-foreground py-8">Loading sensor data...</p>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default LocationsStatus;
