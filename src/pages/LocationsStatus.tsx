@@ -193,7 +193,7 @@ const LocationsStatus = () => {
                       </CardContent>
                     </Card>
 
-                    <Card className="border-primary/20">
+                   {/* <Card className="border-primary/20">
                       <CardContent className="pt-6">
                         <div className="flex items-center gap-2 mb-2">
                           <Flame className="h-5 w-5 text-destructive" />
@@ -201,7 +201,26 @@ const LocationsStatus = () => {
                         </div>
                         <p className="text-2xl font-bold">{data.field3 === 1 ? "Detected" : "None"}</p>
                       </CardContent>
+                    </Card> */}
+                    <Card className={`border-primary/20 ${data.field3 === 1 ? "bg-red-100 border-red-500" : ""}`}>
+                    <CardContent className="pt-6">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Flame className={`h-5 w-5 ${data.field3 === 1 ? "text-red-600" : "text-destructive"}`} />
+                          <span className="font-medium">Flame</span>
+                          
+                          {data.field3 === 1 && (
+                            <Badge variant="destructive" className="ml-auto animate-pulse">
+                              🚨 Flame Detected
+                            </Badge>
+                          )}
+                        </div>
+
+                        <p className={`text-2xl font-bold ${data.field3 === 1 ? "text-red-700" : ""}`}>
+                          {data.field3 === 1 ? "Detected" : "None"}
+                        </p>
+                      </CardContent>
                     </Card>
+
 
                     <Card className="border-primary/20">
                       <CardContent className="pt-6">
