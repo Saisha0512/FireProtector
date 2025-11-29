@@ -36,6 +36,7 @@ const MapView = () => {
   const map = useRef<mapboxgl.Map | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [fireStations, setFireStations] = useState<FireStation[]>([]);
+  const [alertLocationIds, setAlertLocationIds] = useState<string[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
   const [nearestStation, setNearestStation] = useState<FireStation | null>(null);
   const [distance, setDistance] = useState<number | null>(null);
@@ -45,6 +46,19 @@ const MapView = () => {
   useEffect(() => {
     fetchData();
     getUserLocation();
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("map-alerts")
+      .on("postgres_changes", { event: "*", schema: "public", table: "alerts" }, () => {
+        fetchData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const getUserLocation = () => {
@@ -94,8 +108,11 @@ const MapView = () => {
 
     // Add markers for fire detection locations
     locations.forEach((location) => {
-      const color = 
-        location.status === "alert" ? "#ef4444" :
+      const hasActiveAlert = alertLocationIds.includes(location.id);
+      const isAlertLocation = hasActiveAlert || location.status === "alert";
+
+      const color =
+        isAlertLocation ? "#ef4444" :
         location.status === "warning" ? "#f59e0b" :
         "#22c55e";
 
@@ -109,8 +126,8 @@ const MapView = () => {
       el.style.cursor = "pointer";
       el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
       
-      // Add blinking animation for alert locations
-      if (location.status === "alert") {
+      // Add blinking animation for locations with active alerts
+      if (isAlertLocation) {
         el.style.animation = "blink-alert 1s ease-in-out infinite";
       }
 
@@ -188,7 +205,7 @@ const MapView = () => {
     return () => {
       map.current?.remove();
     };
-  }, [locations, fireStations, userLocation]);
+  }, [locations, fireStations, userLocation, alertLocationIds]);
 
   const fetchData = async () => {
     try {
@@ -200,6 +217,19 @@ const MapView = () => {
 
       if (locError) throw locError;
       setLocations((locData || []) as Location[]);
+
+      // Fetch active alerts to highlight locations with active cases
+      const { data: alertsData, error: alertsError } = await supabase
+        .from("alerts")
+        .select("location_id, status")
+        .in("status", ["active", "in_queue"]);
+
+      if (alertsError) throw alertsError;
+
+      const activeLocationIds = Array.from(
+        new Set((alertsData || []).map((a: { location_id: string }) => a.location_id))
+      );
+      setAlertLocationIds(activeLocationIds);
 
       // Fetch fire stations from authority profiles
       const { data: stationData, error: stationError } = await supabase
