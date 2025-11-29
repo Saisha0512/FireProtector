@@ -7,49 +7,75 @@ import { useNavigate } from "react-router-dom";
 export const GlobalAlertListener = () => {
   const navigate = useNavigate();
   const shownAlerts = useRef<Set<string>>(new Set());
+  const alertToasts = useRef<Map<string, { dismiss: () => void }>>(new Map());
 
   useEffect(() => {
-    const handleAlert = async (payload: any, isUpdate: boolean = false) => {
+    const handleAlert = async (payload: any) => {
       const alert = payload.new;
-      // Only show notification once per location, or if it's an update to existing alert
-      const locationKey = alert.location_id;
-      if (!isUpdate && shownAlerts.current.has(locationKey)) {
+      if (!alert) return;
+
+      const alertId = String(alert.id);
+      const status = (alert.status as string | null) ?? "active";
+
+      console.log("GlobalAlertListener received alert:", {
+        alertId,
+        status,
+        type: alert.alert_type,
+      });
+
+      // If alert has been closed / moved out of live cases, dismiss any existing toast
+      if (status === "resolved" || status === "unsolved" || status === "false_alarm") {
+        const existing = alertToasts.current.get(alertId);
+        if (existing) {
+          existing.dismiss();
+          alertToasts.current.delete(alertId);
+        }
+        shownAlerts.current.delete(alertId);
         return;
       }
-      
-      // Mark this location as having shown an alert
-      shownAlerts.current.add(locationKey);
-      
-      // Fetch location name
-      const { data: location } = await supabase
-        .from('locations')
-        .select('name')
-        .eq('id', alert.location_id)
-        .single();
 
-      const locationName = location?.name || 'Unknown Location';
-      
-      // Determine icon and title based on alert type
-      let title = '';
-      
-      switch (alert.alert_type) {
-        case 'fire':
-          title = isUpdate ? '🔥 FIRE ALERT UPDATED' : '🔥 FIRE DETECTED';
-          break;
-        case 'gas_leak':
-          title = isUpdate ? '💨 GAS LEAK UPDATED' : '💨 GAS LEAK DETECTED';
-          break;
-        case 'temperature':
-          title = isUpdate ? '🌡️ TEMPERATURE UPDATED' : '🌡️ HIGH TEMPERATURE';
-          break;
-        default:
-          title = isUpdate ? '⚠️ ALERT UPDATED' : '⚠️ ALERT';
+      // Only show notifications for active / in-queue alerts
+      if (status !== "active" && status !== "in_queue") {
+        return;
       }
 
-      // Show toast notification (persists until manually dismissed)
-      toast({
+      // If we've already shown this alert, keep the existing toast (no re-pop)
+      if (shownAlerts.current.has(alertId)) {
+        return;
+      }
+
+      shownAlerts.current.add(alertId);
+
+      // Fetch location name for description
+      const { data: location } = await supabase
+        .from("locations")
+        .select("name")
+        .eq("id", alert.location_id)
+        .single();
+
+      const locationName = location?.name || "Unknown Location";
+
+      // Determine title based on alert type
+      let title = "";
+      switch (alert.alert_type) {
+        case "fire":
+          title = "🔥 FIRE DETECTED";
+          break;
+        case "gas_leak":
+          title = "💨 GAS LEAK DETECTED";
+          break;
+        case "temperature":
+          title = "🌡️ HIGH TEMPERATURE";
+          break;
+        default:
+          title = "⚠️ ALERT";
+      }
+
+      const description = `Location: ${locationName}\nSeverity: ${String(alert.severity ?? "").toUpperCase()}`;
+
+      const handle = toast({
         title,
-        description: `${locationName} - ${alert.severity.toUpperCase()} severity`,
+        description,
         variant: "destructive",
         action: (
           <button
@@ -61,38 +87,29 @@ export const GlobalAlertListener = () => {
         ),
       });
 
-      // Play alert sound only for new alerts, not updates
-      if (!isUpdate) {
-        try {
-          const audio = new Audio('/alert-sound.mp3');
-          audio.play().catch(() => {
-            // Silently fail if audio cannot be played
-          });
-        } catch (error) {
-          // Silently fail if audio cannot be played
-        }
+      alertToasts.current.set(alertId, { dismiss: handle.dismiss });
+
+      // Play alert sound when toast is first created
+      try {
+        const audio = new Audio("/alert-sound.mp3");
+        audio.play().catch(() => {
+          // Ignore audio errors
+        });
+      } catch {
+        // Ignore audio errors
       }
     };
 
     const channel = supabase
-      .channel('global-alerts')
+      .channel("global-alerts")
       .on(
-        'postgres_changes',
+        "postgres_changes",
         {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'alerts'
+          event: "*",
+          schema: "public",
+          table: "alerts",
         },
-        (payload) => handleAlert(payload, false)
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'alerts'
-        },
-        (payload) => handleAlert(payload, true)
+        handleAlert
       )
       .subscribe();
 
