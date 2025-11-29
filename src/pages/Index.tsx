@@ -8,21 +8,22 @@ const Index = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    checkAuth();
-  }, []);
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        navigate("/dashboard");
+      }
+    };
 
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      navigate("/dashboard");
-    }
-  };
+    checkAuth();
+  }, [navigate]);
 
   return (
     <div className="min-h-screen bg-background">
       <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-accent/10" />
-      
+
       <div className="relative">
+        {/* HEADER */}
         <header className="container mx-auto px-4 py-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -31,12 +32,12 @@ const Index = () => {
               </div>
               <span className="text-2xl font-bold">Fire Defence System</span>
             </div>
-            <Button onClick={() => navigate("/auth")}>
-              Sign In
-            </Button>
+
+            <Button onClick={() => navigate("/auth")}>Sign In</Button>
           </div>
         </header>
 
+        {/* HERO */}
         <main className="container mx-auto px-4 py-20">
           <div className="max-w-4xl mx-auto text-center space-y-8">
             <div className="space-y-4">
@@ -44,21 +45,33 @@ const Index = () => {
                 Real-Time Fire
                 <span className="block text-primary">Monitoring System</span>
               </h1>
+
               <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-                Advanced sensor monitoring and alert management for fire brigades, officers, and local incharges. Stay protected with instant notifications and comprehensive analytics.
+                Advanced sensor monitoring and alert management for fire brigades, officers, 
+                and local incharges. Stay protected with instant notifications and 
+                comprehensive analytics.
               </p>
             </div>
 
+            {/* Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button size="lg" onClick={() => navigate("/auth")} className="text-lg px-8">
                 Get Started
               </Button>
-              <Button size="lg" variant="outline" onClick={() => navigate("/auth")} className="text-lg px-8">
+
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => navigate("/auth")}
+                className="text-lg px-8"
+              >
                 Sign In
               </Button>
             </div>
 
+            {/* FEATURES */}
             <div className="grid md:grid-cols-3 gap-6 mt-16">
+              {/* Live Alerts */}
               <div className="p-6 rounded-lg bg-card border border-border hover:border-primary/50 transition-all">
                 <div className="flex justify-center mb-4">
                   <div className="p-3 rounded-full bg-primary/20">
@@ -67,10 +80,12 @@ const Index = () => {
                 </div>
                 <h3 className="text-xl font-bold mb-2">Live Alerts</h3>
                 <p className="text-muted-foreground">
-                  Receive instant notifications when sensors detect anomalies. Real-time updates every 10 seconds.
+                  Receive instant notifications when sensors detect anomalies. 
+                  Real-time updates every 10 seconds.
                 </p>
               </div>
 
+              {/* Multi-Location */}
               <div className="p-6 rounded-lg bg-card border border-border hover:border-primary/50 transition-all">
                 <div className="flex justify-center mb-4">
                   <div className="p-3 rounded-full bg-accent/20">
@@ -79,10 +94,12 @@ const Index = () => {
                 </div>
                 <h3 className="text-xl font-bold mb-2">Multi-Location</h3>
                 <p className="text-muted-foreground">
-                  Monitor multiple sensor locations simultaneously with an interactive map view and status tracking.
+                  Monitor multiple sensor locations simultaneously with an 
+                  interactive map view and status tracking.
                 </p>
               </div>
 
+              {/* Analytics */}
               <div className="p-6 rounded-lg bg-card border border-border hover:border-primary/50 transition-all">
                 <div className="flex justify-center mb-4">
                   <div className="p-3 rounded-full bg-status-normal/20">
@@ -91,13 +108,15 @@ const Index = () => {
                 </div>
                 <h3 className="text-xl font-bold mb-2">Analytics</h3>
                 <p className="text-muted-foreground">
-                  Track alert history, analyze trends, and generate reports for better emergency preparedness.
+                  Track alert history, analyze trends, and generate reports for 
+                  better emergency preparedness.
                 </p>
               </div>
             </div>
           </div>
         </main>
 
+        {/* FOOTER */}
         <footer className="container mx-auto px-4 py-8 mt-20 border-t border-border">
           <div className="text-center text-sm text-muted-foreground">
             <p>© 2024 Fire Defence System. All rights reserved.</p>
