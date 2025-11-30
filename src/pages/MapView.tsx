@@ -6,11 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, MapPin, Navigation } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
-import "leaflet-routing-machine/dist/leaflet-routing-machine.css";
-import "leaflet-routing-machine";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
 
 interface Location {
   id: string;
@@ -29,108 +26,14 @@ interface FireStation {
   authority_name: string;
 }
 
-// Fix Leaflet default marker icon issue
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-});
-
-// Custom marker icons
-const createCustomIcon = (color: string, size: number = 25) => {
-  return L.divIcon({
-    className: "custom-marker",
-    html: `<div style="
-      background-color: ${color};
-      width: ${size}px;
-      height: ${size}px;
-      border-radius: 50%;
-      border: 3px solid white;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    "></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-  });
-};
-
-const alertIcon = createCustomIcon("#ef4444", 30); // Red for alerts
-const warningIcon = createCustomIcon("#f59e0b", 25); // Yellow for warnings
-const normalIcon = createCustomIcon("#22c55e", 20); // Green for normal
-const userIcon = createCustomIcon("#3b82f6", 25); // Blue for user location
-const fireStationIcon = L.icon({
-  iconUrl: "https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-});
-
-// Routing control component
-const RoutingControl: React.FC<{
-  start: L.LatLng | null;
-  end: L.LatLng | null;
-  onRouteFound: (distance: number) => void;
-}> = ({ start, end, onRouteFound }) => {
-  const map = useMap();
-  const routingControlRef = useRef<L.Routing.Control | null>(null);
-
-  useEffect(() => {
-    if (!map || !start || !end) return;
-
-    // Remove existing routing control
-    if (routingControlRef.current) {
-      map.removeControl(routingControlRef.current);
-    }
-
-    // Create new routing control
-    const control = L.Routing.control({
-      waypoints: [start, end],
-      routeWhileDragging: false,
-      addWaypoints: false,
-      show: false,
-      lineOptions: {
-        styles: [{ color: "#ef4444", weight: 5, opacity: 0.8 }],
-        extendToWaypoints: true,
-        missingRouteTolerance: 0,
-      },
-      router: L.Routing.osrmv1({
-        serviceUrl: "https://router.project-osrm.org/route/v1",
-      }),
-    }).addTo(map);
-
-    // Hide the default instructions panel
-    const container = control.getContainer();
-    if (container) {
-      container.style.display = "none";
-    }
-
-    // Listen for route found event
-    control.on("routesfound", (e: any) => {
-      const route = e.routes[0];
-      if (route && route.summary) {
-        const distanceKm = route.summary.totalDistance / 1000;
-        onRouteFound(distanceKm);
-      }
-    });
-
-    routingControlRef.current = control;
-
-    return () => {
-      if (routingControlRef.current && map) {
-        map.removeControl(routingControlRef.current);
-      }
-    };
-  }, [map, start, end, onRouteFound]);
-
-  return null;
-};
+const MAPTILER_KEY = "2k9xSo6D3dn6XRfFnFxJ";
 
 const MapView = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
+  const mapContainer = useRef<HTMLDivElement>(null);
+  const map = useRef<mapboxgl.Map | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [fireStations, setFireStations] = useState<FireStation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
@@ -138,10 +41,6 @@ const MapView = () => {
   const [distance, setDistance] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
-  const [mapCenter, setMapCenter] = useState<[number, number]>([28.6139, 77.209]);
-  const [routeStart, setRouteStart] = useState<L.LatLng | null>(null);
-  const [routeEnd, setRouteEnd] = useState<L.LatLng | null>(null);
-  const mapRef = useRef<L.Map | null>(null);
 
   useEffect(() => {
     fetchData();
@@ -152,12 +51,7 @@ const MapView = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const userPos: [number, number] = [
-            position.coords.latitude,
-            position.coords.longitude,
-          ];
-          setUserLocation(userPos);
-          setMapCenter(userPos);
+          setUserLocation([position.coords.longitude, position.coords.latitude]);
         },
         (error) => {
           console.error("Error getting user location:", error);
@@ -181,6 +75,120 @@ const MapView = () => {
       }
     }
   }, [searchParams, locations, fireStations]);
+
+  useEffect(() => {
+    if (!mapContainer.current || locations.length === 0) return;
+
+    // Set MapTiler access token
+    mapboxgl.accessToken = MAPTILER_KEY;
+
+    // Initialize map with MapTiler
+    map.current = new mapboxgl.Map({
+      container: mapContainer.current,
+      style: `https://api.maptiler.com/maps/streets/style.json?key=${MAPTILER_KEY}`,
+      center: [77.2090, 28.6139], // Default to Delhi
+      zoom: 11,
+    });
+
+    map.current.addControl(new mapboxgl.NavigationControl(), "top-right");
+
+    // Add markers for fire detection locations
+    locations.forEach((location) => {
+      const color = 
+        location.status === "alert" ? "#ef4444" :
+        location.status === "warning" ? "#f59e0b" :
+        "#22c55e";
+
+      const el = document.createElement("div");
+      el.className = "marker";
+      el.style.backgroundColor = color;
+      el.style.width = "24px";
+      el.style.height = "24px";
+      el.style.borderRadius = "50%";
+      el.style.border = "3px solid white";
+      el.style.cursor = "pointer";
+      el.style.boxShadow = "0 2px 4px rgba(0,0,0,0.3)";
+      
+      // Add blinking animation for alert locations
+      if (location.status === "alert") {
+        el.style.animation = "blink-alert 1s ease-in-out infinite";
+      }
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([location.longitude, location.latitude])
+        .setPopup(
+          new mapboxgl.Popup({ offset: 25 })
+            .setHTML(`
+              <div style="padding: 8px;">
+                <h3 style="font-weight: bold; margin-bottom: 4px;">${location.name}</h3>
+                <p style="font-size: 12px; color: #666;">${location.region}</p>
+                <p style="font-size: 12px; margin-top: 4px;">Status: <strong>${location.status}</strong></p>
+              </div>
+            `)
+        )
+        .addTo(map.current!);
+
+      el.addEventListener("click", () => {
+        setSelectedLocation(location);
+        calculateNearestStation(location);
+      });
+    });
+
+    // Add markers for fire stations
+    fireStations.forEach((station) => {
+      const el = document.createElement("div");
+      el.innerHTML = "🚒";
+      el.style.fontSize = "28px";
+      el.style.cursor = "pointer";
+
+      new mapboxgl.Marker({ element: el })
+        .setLngLat([station.fire_station_longitude, station.fire_station_latitude])
+        .setPopup(
+          new mapboxgl.Popup({ offset: 25 })
+            .setHTML(`
+              <div style="padding: 8px;">
+                <h3 style="font-weight: bold; margin-bottom: 4px;">🚒 ${station.fire_station}</h3>
+                <p style="font-size: 12px; color: #666;">${station.authority_name}</p>
+              </div>
+            `)
+        )
+        .addTo(map.current!);
+    });
+
+    // Add marker for user's current location
+    if (userLocation) {
+      const userEl = document.createElement("div");
+      userEl.innerHTML = "📍";
+      userEl.style.fontSize = "32px";
+      userEl.style.cursor = "pointer";
+
+      new mapboxgl.Marker({ element: userEl })
+        .setLngLat(userLocation)
+        .setPopup(
+          new mapboxgl.Popup({ offset: 25 })
+            .setHTML(`
+              <div style="padding: 8px;">
+                <h3 style="font-weight: bold; margin-bottom: 4px;">Your Location</h3>
+                <p style="font-size: 12px; color: #666;">Current Position</p>
+              </div>
+            `)
+        )
+        .addTo(map.current!);
+    }
+
+    // Fit map to show all locations
+    if (locations.length > 0) {
+      const bounds = new mapboxgl.LngLatBounds();
+      locations.forEach((loc) => bounds.extend([loc.longitude, loc.latitude]));
+      fireStations.forEach((station) => bounds.extend([station.fire_station_longitude, station.fire_station_latitude]));
+      if (userLocation) bounds.extend(userLocation);
+      map.current.fitBounds(bounds, { padding: 50 });
+    }
+
+    return () => {
+      map.current?.remove();
+    };
+  }, [locations, fireStations, userLocation]);
 
   const fetchData = async () => {
     try {
@@ -215,46 +223,55 @@ const MapView = () => {
   };
 
   const calculateNearestStation = (location: Location) => {
-    setRouteStart(null);
-    setRouteEnd(null);
-    setDistance(null);
-
     // Calculate distance from user's current location to the fire alert location
     if (userLocation) {
-      setRouteStart(L.latLng(userLocation[0], userLocation[1]));
-      setRouteEnd(L.latLng(location.latitude, location.longitude));
-      return;
-    }
-
-    // Fallback: calculate nearest fire station
-    if (fireStations.length === 0) {
-      setNearestStation(null);
-      return;
-    }
-
-    let minDistance = Infinity;
-    let nearest: FireStation | null = null;
-
-    fireStations.forEach((station) => {
       const dist = calculateDistance(
+        userLocation[1], // latitude
+        userLocation[0], // longitude
         location.latitude,
-        location.longitude,
-        station.fire_station_latitude,
-        station.fire_station_longitude
+        location.longitude
       );
+      setDistance(dist);
 
-      if (dist < minDistance) {
-        minDistance = dist;
-        nearest = station;
+      // Draw route from user location to fire alert location
+      if (map.current) {
+        drawRoute(userLocation, [location.longitude, location.latitude]);
       }
-    });
+    } else {
+      // Fallback: calculate nearest fire station
+      if (fireStations.length === 0) {
+        setNearestStation(null);
+        setDistance(null);
+        return;
+      }
 
-    setNearestStation(nearest);
+      let minDistance = Infinity;
+      let nearest: FireStation | null = null;
 
-    // Draw route from nearest fire station to alert location
-    if (nearest) {
-      setRouteStart(L.latLng(nearest.fire_station_latitude, nearest.fire_station_longitude));
-      setRouteEnd(L.latLng(location.latitude, location.longitude));
+      fireStations.forEach((station) => {
+        const dist = calculateDistance(
+          location.latitude,
+          location.longitude,
+          station.fire_station_latitude,
+          station.fire_station_longitude
+        );
+
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearest = station;
+        }
+      });
+
+      setNearestStation(nearest);
+      setDistance(minDistance);
+
+      // Draw route on map
+      if (nearest && map.current) {
+        drawRoute(
+          [location.longitude, location.latitude],
+          [nearest.fire_station_longitude, nearest.fire_station_latitude]
+        );
+      }
     }
   };
 
@@ -272,6 +289,138 @@ const MapView = () => {
     return R * c;
   };
 
+  const drawRoute = (start: [number, number], end: [number, number]) => {
+    if (!map.current) return;
+
+    // Remove existing route layers if present
+    if (map.current.getLayer("route-outline")) {
+      map.current.removeLayer("route-outline");
+    }
+    if (map.current.getLayer("route")) {
+      map.current.removeLayer("route");
+    }
+    if (map.current.getSource("route")) {
+      map.current.removeSource("route");
+    }
+
+    // Fetch route from MapTiler routing API (uses shortest path algorithms on road networks)
+    const routeUrl = `https://api.maptiler.com/routing/driving/${start[0]},${start[1]};${end[0]},${end[1]}.json?key=${MAPTILER_KEY}`;
+
+    fetch(routeUrl)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.routes || data.routes.length === 0) {
+          drawStraightLine(start, end);
+          return;
+        }
+
+        const route = data.routes[0];
+        const coordinates = route.geometry.coordinates;
+
+        // Add route using actual road geometry
+        map.current!.addSource("route", {
+          type: "geojson",
+          data: {
+            type: "Feature",
+            properties: {
+              distance: route.distance,
+              duration: route.duration,
+            },
+            geometry: {
+              type: "LineString",
+              coordinates: coordinates,
+            },
+          },
+        });
+
+        // Add white outline
+        map.current!.addLayer({
+          id: "route-outline",
+          type: "line",
+          source: "route",
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": "#ffffff",
+            "line-width": 8,
+            "line-opacity": 0.6,
+          },
+        });
+
+        // Add main route line
+        map.current!.addLayer({
+          id: "route",
+          type: "line",
+          source: "route",
+          layout: {
+            "line-join": "round",
+            "line-cap": "round",
+          },
+          paint: {
+            "line-color": "#ef4444",
+            "line-width": 5,
+            "line-opacity": 0.9,
+          },
+        });
+
+        // Fit map to route
+        const bounds = new mapboxgl.LngLatBounds();
+        coordinates.forEach((coord: [number, number]) => bounds.extend(coord));
+        map.current!.fitBounds(bounds, { padding: 100 });
+
+        // Update with actual road distance
+        const distanceKm = route.distance / 1000;
+        setDistance(distanceKm);
+      })
+      .catch((error) => {
+        console.error("Routing error:", error);
+        toast({
+          title: "Routing unavailable",
+          description: "Showing straight-line distance",
+          variant: "default",
+        });
+        drawStraightLine(start, end);
+      });
+  };
+
+  const drawStraightLine = (start: [number, number], end: [number, number]) => {
+    if (!map.current) return;
+
+    map.current.addSource("route", {
+      type: "geojson",
+      data: {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "LineString",
+          coordinates: [start, end],
+        },
+      },
+    });
+
+    map.current.addLayer({
+      id: "route",
+      type: "line",
+      source: "route",
+      layout: {
+        "line-join": "round",
+        "line-cap": "round",
+      },
+      paint: {
+        "line-color": "#ef4444",
+        "line-width": 5,
+        "line-dasharray": [2, 2],
+      },
+    });
+
+    const bounds = new mapboxgl.LngLatBounds();
+    bounds.extend(start);
+    bounds.extend(end);
+    map.current.fitBounds(bounds, { padding: 100 });
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "alert":
@@ -281,30 +430,6 @@ const MapView = () => {
       default:
         return "bg-status-normal";
     }
-  };
-
-  const getMarkerIcon = (status: string) => {
-    switch (status) {
-      case "alert":
-        return alertIcon;
-      case "warning":
-        return warningIcon;
-      default:
-        return normalIcon;
-    }
-  };
-
-  const handleLocationClick = (location: Location) => {
-    setSelectedLocation(location);
-    calculateNearestStation(location);
-    setMapCenter([location.latitude, location.longitude]);
-    if (mapRef.current) {
-      mapRef.current.setView([location.latitude, location.longitude], 14);
-    }
-  };
-
-  const handleRouteFound = (distanceKm: number) => {
-    setDistance(distanceKm);
   };
 
   return (
@@ -339,67 +464,7 @@ const MapView = () => {
                     <p className="text-muted-foreground">Loading map...</p>
                   </div>
                 ) : (
-                  <MapContainer
-                    center={mapCenter}
-                    zoom={11}
-                    className="h-full w-full rounded-lg"
-                    ref={mapRef}
-                  >
-                    <TileLayer
-                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    />
-
-                    {/* User location marker */}
-                    {userLocation && (
-                      <Marker position={userLocation} icon={userIcon}>
-                        <Popup>Your Location</Popup>
-                      </Marker>
-                    )}
-
-                    {/* Fire detection location markers */}
-                    {locations.map((location) => (
-                      <Marker
-                        key={location.id}
-                        position={[location.latitude, location.longitude]}
-                        icon={getMarkerIcon(location.status)}
-                        eventHandlers={{
-                          click: () => handleLocationClick(location),
-                        }}
-                      >
-                        <Popup>
-                          <div className="text-sm">
-                            <p className="font-semibold">{location.name}</p>
-                            <p className="text-muted-foreground">{location.region}</p>
-                            <Badge variant="outline" className="mt-1">
-                              {location.status}
-                            </Badge>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
-
-                    {/* Fire station markers */}
-                    {fireStations.map((station) => (
-                      <Marker
-                        key={station.id}
-                        position={[station.fire_station_latitude, station.fire_station_longitude]}
-                        icon={fireStationIcon}
-                      >
-                        <Popup>
-                          <div className="text-sm">
-                            <p className="font-semibold">🚒 {station.fire_station || "Fire Station"}</p>
-                            <p className="text-muted-foreground">{station.authority_name}</p>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
-
-                    {/* Routing control */}
-                    {routeStart && routeEnd && (
-                      <RoutingControl start={routeStart} end={routeEnd} onRouteFound={handleRouteFound} />
-                    )}
-                  </MapContainer>
+                  <div ref={mapContainer} className="w-full h-full rounded-lg" />
                 )}
               </CardContent>
             </Card>
@@ -424,7 +489,16 @@ const MapView = () => {
                           ? "border-primary bg-primary/5"
                           : "border-border"
                       }`}
-                      onClick={() => handleLocationClick(location)}
+                      onClick={() => {
+                        setSelectedLocation(location);
+                        calculateNearestStation(location);
+                        if (map.current) {
+                          map.current.flyTo({
+                            center: [location.longitude, location.latitude],
+                            zoom: 14,
+                          });
+                        }
+                      }}
                     >
                       <div className="flex items-start justify-between mb-2">
                         <div className="flex items-center gap-2">
@@ -451,7 +525,7 @@ const MapView = () => {
                   <div>
                     <span className="text-sm text-muted-foreground">Alert Location</span>
                     <p className="font-medium">{selectedLocation.name}</p>
-                    <Badge
+                    <Badge 
                       variant={selectedLocation.status === "alert" ? "destructive" : "secondary"}
                       className="mt-1"
                     >
@@ -476,10 +550,10 @@ const MapView = () => {
                         </p>
                       </div>
 
-                      <Button
-                        className="w-full"
+                      <Button 
+                        className="w-full" 
                         onClick={() => {
-                          const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation[0]},${userLocation[1]}&destination=${selectedLocation.latitude},${selectedLocation.longitude}`;
+                          const url = `https://www.google.com/maps/dir/?api=1&origin=${userLocation[1]},${userLocation[0]}&destination=${selectedLocation.latitude},${selectedLocation.longitude}`;
                           window.open(url, "_blank");
                         }}
                       >
@@ -504,8 +578,8 @@ const MapView = () => {
                         </p>
                       </div>
 
-                      <Button
-                        className="w-full"
+                      <Button 
+                        className="w-full" 
                         onClick={() => {
                           const url = `https://www.google.com/maps/dir/?api=1&origin=${nearestStation.fire_station_latitude},${nearestStation.fire_station_longitude}&destination=${selectedLocation.latitude},${selectedLocation.longitude}`;
                           window.open(url, "_blank");
